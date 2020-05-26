@@ -1,6 +1,13 @@
 # PiLEDlights
 For the Raspberry Pi - Make LEDs blink on network and/or SD card/USB storage activity.
 
+## Modified to use the piGPIO library
+I've modified these sources to use the piGPIO library instead of the unsupported wiringPi library.
+
+The original README text is here for reference, but the actual parameters and values are now different (netleds, for example now has a distinct tx and rx LED)
+
+## Original README
+
 hddledPi blinks a LED connected to a GPIO pin on any mass storage access. Not only on SD card access, but also on USB thumbdrive and hard drive activity.  
 netledPi blinks a LED connected to a GPIO pin when there is activity on any network interface. Not only the built-in ethernet interface, but also on any other USB ethernet or WiFi interface.  
 actledPi blinks the Pi's ACT led on all mass storage I/O, i.e. not only the SD card.

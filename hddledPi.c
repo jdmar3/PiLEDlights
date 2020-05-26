@@ -61,11 +61,11 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <wiringPi.h>
+#include <pigpio.h>
 
 
 static unsigned int o_refresh = 20; /* milliseconds */
-static unsigned int o_gpiopin = 10; /* wiringPi numbering scheme */
+static unsigned int o_gpiopin = 4; /* BCM numbering scheme */
 static int o_detach = 0;
 
 static volatile sig_atomic_t running = 1;
@@ -125,9 +125,9 @@ void led(int on) {
                 return;
 
         if (on) {
-                digitalWrite (o_gpiopin, HIGH);
+		gpioWrite( o_gpiopin, PI_HIGH );
         } else {
-                digitalWrite (o_gpiopin, LOW);
+                gpioWrite( o_gpiopin, PI_LOW );
         }
 
         current = on;
@@ -163,7 +163,7 @@ error_t parse_options(int key, char *arg, struct argp_state *state) {
 int main(int argc, char **argv) {
         struct argp_option options[] = {
                 { "detach",  'd',      NULL, 0, "Detach from terminal" },
-                { "pin",     'p',   "VALUE", 0, "GPIO pin where LED is connected (default: wiringPi pin 10, physical pin 24 on the P1 header)" },
+                { "pin",     'p',   "VALUE", 0, "GPIO pin where LED is connected (default: BCM 4, physical pin 7 on the P1 header)" },
                 { "refresh", 'r',   "VALUE", 0, "Refresh interval (default: 20 ms)" },
                 { 0 },
         };
@@ -184,8 +184,12 @@ int main(int argc, char **argv) {
         delay.tv_sec = o_refresh / 1000;
         delay.tv_nsec = 1000000 * (o_refresh % 1000);
 
-        wiringPiSetup () ;
-        pinMode (o_gpiopin, OUTPUT) ;
+        /* If we can't set up pigpio, then just bail */
+	if( gpioInitialise() < 0 ) {
+		fprintf( stderr, "Unable to setup the piGPIO library. STOP." );
+		return -1;
+	}
+	gpioSetMode( o_gpiopin, PI_OUTPUT );
 
 
         /* Open the vmstat file */
@@ -196,7 +200,7 @@ int main(int argc, char **argv) {
         }
 
         /* Ensure the LED is off */
-        led(LOW);
+        led(0);
 
         /* Save the current I/O stat values */
         if (activity(vmstat) < 0)
@@ -240,7 +244,10 @@ int main(int argc, char **argv) {
         }
 
         /* Ensure the LED is off */
-        led(LOW);
+        led(0);
+
+	/* Halt any library functions */
+	gpioTerminate();
 
         status = EXIT_SUCCESS;
 

@@ -61,16 +61,45 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <wiringPi.h>
+#include <pigpio.h>
 
 
 static unsigned int o_refresh = 20; /* milliseconds */
-static unsigned int o_gpiopin = 11; /* wiringPi numbering scheme */
+static unsigned int o_gpiopin_tx = 2;
+static unsigned int o_gpiopin_rx = 3;
 static int o_detach = 0;
 
 static volatile sig_atomic_t running = 1;
 static char *line = NULL;
 static size_t len = 0;
+
+/* Update the TX LED */
+void tx_led(int on) {
+        static int tx_current = 1; /* Ensure the LED turns off on first call */
+        if (tx_current == on)
+                return;
+
+        if (on)
+		gpioWrite( o_gpiopin_tx, PI_HIGH );
+        else
+                gpioWrite( o_gpiopin_tx, PI_LOW );
+
+        tx_current = on;
+}
+
+/* Update the RX LED */
+void rx_led(int on) {
+        static int rx_current = 1; /* Ensure the LED turns off on first call */
+        if (rx_current == on)
+                return;
+
+        if (on)
+		gpioWrite( o_gpiopin_rx, PI_HIGH );
+        else
+                gpioWrite( o_gpiopin_rx, PI_LOW );
+
+        rx_current = on;
+}
 
 /* Reread the netdevices file */
 int activity(FILE *netdevices) {
@@ -118,28 +147,23 @@ int activity(FILE *netdevices) {
         }
 
         /* Anything changed? */
-        result = (prev_inpackets  != inpackets) ||
-                 (prev_outpackets != outpackets);
+        if( prev_inpackets  != inpackets )
+                rx_led( PI_HIGH );
+        else
+                rx_led( PI_LOW );
+        
+        if( prev_outpackets != outpackets )
+                tx_led( PI_HIGH );
+        else
+                tx_led( PI_LOW );
+
         prev_inpackets = inpackets;
         prev_outpackets = outpackets;
 
-        return result;
+        return 0;
 }
 
-/* Update the LED */
-void led(int on) {
-        static int current = 1; /* Ensure the LED turns off on first call */
-        if (current == on)
-                return;
 
-        if (on) {
-                digitalWrite (o_gpiopin, HIGH);
-        } else {
-                digitalWrite (o_gpiopin, LOW);
-        }
-
-        current = on;
-}
 
 /* Signal handler -- break out of the main loop */
 void shutdown(int sig) {
@@ -158,9 +182,15 @@ error_t parse_options(int key, char *arg, struct argp_state *state) {
                         argp_failure(state, EXIT_FAILURE, 0,
                                 "refresh interval must be at least 10");
                 break;
-        case 'p':
-                o_gpiopin = strtol(arg, NULL, 10);
-                if ((o_gpiopin < 0) || (o_gpiopin > 29))
+        case 3:
+                o_gpiopin_tx = strtol(arg, NULL, 10);
+                if ((o_gpiopin_tx < 0) || (o_gpiopin_tx > 29))
+                        argp_failure(state, EXIT_FAILURE, 0,
+                                "pin number must be between 0 and 29");
+                break;
+        case 4:
+                o_gpiopin_rx = strtol(arg, NULL, 10);
+                if ((o_gpiopin_rx < 0) || (o_gpiopin_rx > 29))
                         argp_failure(state, EXIT_FAILURE, 0,
                                 "pin number must be between 0 and 29");
                 break;
@@ -169,9 +199,11 @@ error_t parse_options(int key, char *arg, struct argp_state *state) {
 }
 
 int main(int argc, char **argv) {
+
         struct argp_option options[] = {
                 { "detach",  'd',      NULL, 0, "Detach from terminal" },
-                { "pin",     'p',   "VALUE", 0, "GPIO pin where LED is connected (default: wiringPi pin 11, physical pin 25 on the P1 header)" },
+                { "tx" ,     0,   "VALUE", 0, "GPIO pin where LED is connected (transmit data) (default: BCM 2 physical pin 3 on the P1 header)" },
+                { "rx",      1,   "VALUE", 0, "GPIO pin where LED is connected (receive data) (default: BCM 3 physical pin 5 on the P1 header)" },
                 { "refresh", 'r',   "VALUE", 0, "Refresh interval (default: 20 ms)" },
                 { 0 },
         };
@@ -192,8 +224,13 @@ int main(int argc, char **argv) {
         delay.tv_sec = o_refresh / 1000;
         delay.tv_nsec = 1000000 * (o_refresh % 1000);
 
-        wiringPiSetup () ;
-        pinMode (o_gpiopin, OUTPUT) ;
+	/* If we can't set up pigpio, then just bail */
+	if( gpioInitialise() < 0 ) {
+		fprintf( stderr, "Unable to setup the piGPIO library. STOP." );
+		return -1;
+	}
+	gpioSetMode( o_gpiopin_tx, PI_OUTPUT );
+        gpioSetMode( o_gpiopin_rx, PI_OUTPUT );
 
 
         /* Open the netdevices file */
@@ -204,7 +241,8 @@ int main(int argc, char **argv) {
         }
 
         /* Ensure the LED is off */
-        led(LOW);
+        tx_led(0);
+        rx_led(0);
 
         /* Save the current I/O stat values */
         if (activity(netdevices) < 0)
@@ -238,21 +276,22 @@ int main(int argc, char **argv) {
 
         /* Loop until signal received */
         while (running) {
-                int a;
                 if (nanosleep(&delay, NULL) < 0)
                         break;
-                a = activity(netdevices);
-                if (a < 0)
+                if( activity(netdevices) < 0 )
                         break;
-                led(a);
         }
 
         /* Ensure the LED is off */
-        led(LOW);
+        tx_led(0);
+        rx_led(0);
 
         status = EXIT_SUCCESS;
 
 out:
+	/* Halt any library functions */
+	gpioTerminate();
+
         if (line) free(line);
         if (netdevices) fclose(netdevices);
         return status;
