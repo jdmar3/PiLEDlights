@@ -25,32 +25,34 @@
  * For more information, please refer to <http://unlicense.org/>
 
  *
- * A network activity light for the Raspberry Pi, using an LED connected to a GPIO pin.
+ * A disk activity light for the Raspberry Pi, using an LED connected to a GPIO pin.
  * Based on hddled.c - http://members.optusnet.com.au/foonly/whirlpool/code/hddled.c -
- * This program uses the WiringPi library by Gordon Henderson - http://wiringpi.com/ - Thanks, Gordon!
+ * This program uses the pigpio library. 
  * 
  *
  * To compile:
- *   gcc -Wall -O3 -o netledPi netledPi.c -lwiringPi
+ *   gcc -Wall -O3 -pthread -lpigpio -lrt -o multiactledPi multiactledPi.c
  *
  * Options:
- * -d, --detach               Detach from terminal (become a daemon)
- * -p, --pin=VALUE            GPIO pin (using wiringPi numbering scheme) where LED is connected (default: 11)
- * -r, --refresh=VALUE        Refresh interval (default: 20 ms)
+ * -d, --detach		Detach from terminal (become a daemon)
+ * -h, --hd=VALUE	GPIO disk activity pin (using BCM_GPIO numbering scheme) where LED is connected (default: 12)
+ * -t, --tx=VALUE	GPIO transmit activity pin (using BCM_GPIO numbering scheme) here LED is connected (default: 7)
+ * -r, --rx=VALUE	GPIO receive activity pin (using BCM_GPIO numbering scheme) here LED is connected (default: 8)
+ * -R, --refresh=VALUE	Refresh interval (default: 20 ms)
+ *
+ * Default LED Pins - BCM_GPIO 12, 7, and 8 are physical pins 32, 26, and 24 on the Pi's 40-pin header, respectively..
+ * Note: Pins 7 and 8 are also used for the SPI interface. If you have SPI add-ons connected,
+ * you'll have to use the -t and -r options to change them to other, unused pins.
  *
  * GPIO pin ----|>|----[330]----+
  *              LED             |
  *                             ===
  *                            Ground
- *
- * Default LED Pin - wiringPi pin 11 is BCM_GPIO 7, physical pin 26 on the Pi's P1 header.
- * Note: This pin is also used for the SPI interface. If you have SPI add-ons connected,
- * you'll have to use the -p option to change it to another, unused pin.
  */
 
 
+#define VMSTAT "/proc/vmstat"
 #define NETDEVICES "/proc/net/dev"
-
 
 #define _GNU_SOURCE
 
@@ -65,8 +67,9 @@
 
 
 static unsigned int o_refresh = 20; /* milliseconds */
-static unsigned int o_gpiopin_tx = 2;
-static unsigned int o_gpiopin_rx = 3;
+static unsigned int o_gpiopin_hd = 12; /* BCM numbering scheme */
+static unsigned int o_gpiopin_tx = 7;
+static unsigned int o_gpiopin_rx = 8;
 static int o_detach = 0;
 
 static volatile sig_atomic_t running = 1;
@@ -75,30 +78,93 @@ static size_t len = 0;
 
 /* Update the TX LED */
 void tx_led(int on) {
-        static int tx_current = 1; /* Ensure the LED turns off on first call */
-        if (tx_current == on)
-                return;
+	static int tx_current = 1; /* Ensure the LED turns off on first call */
+	if (tx_current == on)
+	        return;
 
-        if (on)
+	if (on) {
 		gpioWrite( o_gpiopin_tx, PI_HIGH );
-        else
-                gpioWrite( o_gpiopin_tx, PI_LOW );
+	} else {
+		gpioWrite( o_gpiopin_tx, PI_LOW );
+	}
 
-        tx_current = on;
+	tx_current = on;
 }
 
 /* Update the RX LED */
 void rx_led(int on) {
-        static int rx_current = 1; /* Ensure the LED turns off on first call */
-        if (rx_current == on)
-                return;
+	static int rx_current = 1; /* Ensure the LED turns off on first call */
+	if (rx_current == on)
+	        return;
 
-        if (on)
-		gpioWrite( o_gpiopin_rx, PI_HIGH );
-        else
-                gpioWrite( o_gpiopin_rx, PI_LOW );
+	if (on) {
+	        gpioWrite( o_gpiopin_rx, PI_HIGH );
+	} else {
+	        gpioWrite( o_gpiopin_rx, PI_LOW );
+	}	
 
-        rx_current = on;
+	rx_current = on;
+}
+
+/* Update the LED */
+void hd_led(int on) {
+	static int hd_current = 1; /* Ensure the LED turns off on first call */
+	if (hd_current == on) 
+		return;
+
+	if (on) {
+		gpioWrite( o_gpiopin_hd, PI_HIGH );
+	} else {
+		gpioWrite( o_gpiopin_hd, PI_LOW );
+	}   
+
+	hd_current = on; 
+}
+
+/* Reread the vmstat file */
+int activity(FILE *vmstat) {
+        static unsigned int prev_pgpgin, prev_pgpgout;
+        unsigned int pgpgin, pgpgout;
+        int found_pgpgin, found_pgpgout;
+        int result;
+
+        /* Reload the vmstat file */
+        result = TEMP_FAILURE_RETRY(fseek(vmstat, 0L, SEEK_SET));
+        if (result) {
+                perror("Could not rewind " VMSTAT);
+                return result;
+        }
+
+        /* Clear glibc's buffer */
+        result = TEMP_FAILURE_RETRY(fflush(vmstat));
+        if (result) {
+                perror("Could not flush input stream");
+                return result;
+        }
+
+        /* Extract the I/O stats */
+        found_pgpgin = found_pgpgout = 0;
+        while (getline(&line, &len, vmstat) != -1 && errno != EINTR) {
+                if (sscanf(line, "pgpgin %u", &pgpgin))
+                        found_pgpgin++;
+                else if (sscanf(line, "pgpgout %u", &pgpgout))
+                        found_pgpgout++;
+                if (found_pgpgin && found_pgpgout)
+                        break;
+        }
+        if (!found_pgpgin || !found_pgpgout) {
+                fprintf(stderr, "Could not find required lines in " VMSTAT);
+                return -1;
+        }
+
+        /* Anything changed? */
+        result =
+                (prev_pgpgin  != pgpgin) ||
+                (prev_pgpgout != pgpgout);
+        prev_pgpgin = pgpgin;
+        prev_pgpgout = pgpgout;
+
+        return result;
 }
 
 /* Reread the netdevices file */
@@ -151,7 +217,7 @@ int activity(FILE *netdevices) {
                 rx_led( PI_HIGH );
         else
                 rx_led( PI_LOW );
-        
+
         if( prev_outpackets != outpackets )
                 tx_led( PI_HIGH );
         else
@@ -162,8 +228,6 @@ int activity(FILE *netdevices) {
 
         return 0;
 }
-
-
 
 /* Signal handler -- break out of the main loop */
 void shutdown(int sig) {
@@ -176,19 +240,25 @@ error_t parse_options(int key, char *arg, struct argp_state *state) {
         case 'd':
                 o_detach = 1;
                 break;
-        case 'r':
+        case 'R':
                 o_refresh = strtol(arg, NULL, 10);
                 if (o_refresh < 10)
                         argp_failure(state, EXIT_FAILURE, 0,
                                 "refresh interval must be at least 10");
                 break;
-        case 3:
+        case 'h':
+                o_gpiopin_hd = strtol(arg, NULL, 10);
+                if ((o_gpiopin_hd < 0) || (o_gpiopin_hd > 29))
+                        argp_failure(state, EXIT_FAILURE, 0,
+                                "pin number must be between 0 and 29");
+                break;
+	case 't':
                 o_gpiopin_tx = strtol(arg, NULL, 10);
                 if ((o_gpiopin_tx < 0) || (o_gpiopin_tx > 29))
                         argp_failure(state, EXIT_FAILURE, 0,
                                 "pin number must be between 0 and 29");
                 break;
-        case 4:
+        case 'r':
                 o_gpiopin_rx = strtol(arg, NULL, 10);
                 if ((o_gpiopin_rx < 0) || (o_gpiopin_rx > 29))
                         argp_failure(state, EXIT_FAILURE, 0,
@@ -201,18 +271,20 @@ error_t parse_options(int key, char *arg, struct argp_state *state) {
 int main(int argc, char **argv) {
         struct argp_option options[] = {
                 { "detach",  'd',      NULL, 0, "Detach from terminal" },
-                { "tx" ,     0,   "VALUE", 0, "GPIO pin where LED is connected (transmit data) (default: BCM 2 physical pin 3 on the P1 header)" },
-                { "rx",      1,   "VALUE", 0, "GPIO pin where LED is connected (receive data) (default: BCM 3 physical pin 5 on the P1 header)" },
-                { "refresh", 'r',   "VALUE", 0, "Refresh interval (default: 20 ms)" },
+                { "hd",     'h',   "VALUE", 0, "GPIO pin where LED is connected (disk activity) (default: BCM 4, physical pin 12 on the P1 header)" },
+		{ "tx" ,     't',   "VALUE", 0, "GPIO pin where LED is connected (transmit data) (default: BCM 7 physical pin 3 on the P1 header)" },
+                { "rx",      'r',   "VALUE", 0, "GPIO pin where LED is connected (receive data) (default: BCM 8 physical pin  on the header)" },
+                { "refresh", 'R',   "VALUE", 0, "Refresh interval (default: 20 ms)" },
                 { 0 },
         };
         struct argp parser = {
                 NULL, parse_options, NULL,
-                "Show network activity using an LED wired to a GPIO pin.",
+                "Show disk and network activity using LEDs wired to GPIO pins.",
                 NULL, NULL, NULL
         };
         int status = EXIT_FAILURE;
-        FILE *netdevices = NULL;
+        FILE *vmstat = NULL;
+	FILE *netdevices = NULL;
         struct timespec delay;
 
         /* Parse the command-line */
@@ -223,14 +295,23 @@ int main(int argc, char **argv) {
         delay.tv_sec = o_refresh / 1000;
         delay.tv_nsec = 1000000 * (o_refresh % 1000);
 
-	/* If we can't set up pigpio, then just bail */
+        /* If we can't set up pigpio, then just bail */
 	if( gpioInitialise() < 0 ) {
-		fprintf( stderr, "Unable to setup the piGPIO library. STOP." 
+		fprintf( stderr, "Unable to setup the piGPIO library. STOP." );
+		return -1;
 	}
+	gpioSetMode( o_gpiopin_hd, PI_OUTPUT );
 	gpioSetMode( o_gpiopin_rx, PI_OUTPUT );
+	gpioSetMode( o_gpiopin_tx, PI_OUTPUT );
 
+        /* Open the vmstat file */
+        vmstat = fopen(VMSTAT, "r");
+        if (!vmstat) {
+                perror("Could not open " VMSTAT " for reading");
+                goto out;
+        }
 
-        /* Open the netdevices file */
+	/* Open the netdevices file */
         netdevices = fopen(NETDEVICES, "r");
         if (!netdevices) {
                 perror("Could not open " NETDEVICES " for reading");
@@ -238,11 +319,12 @@ int main(int argc, char **argv) {
         }
 
         /* Ensure the LED is off */
-        tx_led(0);
+        hd_led(0);
+	tx_led(0);
         rx_led(0);
 
         /* Save the current I/O stat values */
-        if (activity(netdevices) < 0)
+        if (activity(vmstat) < 0)
                 goto out;
 
         /* Detach from terminal? */
@@ -273,24 +355,30 @@ int main(int argc, char **argv) {
 
         /* Loop until signal received */
         while (running) {
+                int a;
                 if (nanosleep(&delay, NULL) < 0)
                         break;
-                if( activity(netdevices) < 0 )
+                a = activity(vmstat);
+                if (a < 0)
+                        break;
+                hd_led(a);
+		if( activity(netdevices) < 0 )
                         break;
         }
 
         /* Ensure the LED is off */
-        tx_led(0);
-        rx_led(0);
+        hd_led(0);
+	tx_led(0);
+	rx_led(0);
 
         status = EXIT_SUCCESS;
 
 out:
 	/* Halt any library functions */
 	gpioTerminate();
-
-        if (line) free(line);
-        if (netdevices) fclose(netdevices);
+        
+	if (line) free(line);
+        if (vmstat) fclose(vmstat);
         return status;
 }
 
