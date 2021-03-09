@@ -122,7 +122,7 @@ void hd_led(int on) {
 }
 
 /* Reread the vmstat file */
-int activity(FILE *vmstat) {
+int diskact(FILE *vmstat) {
         static unsigned int prev_pgpgin, prev_pgpgout;
         unsigned int pgpgin, pgpgout;
         int found_pgpgin, found_pgpgout;
@@ -168,7 +168,7 @@ int activity(FILE *vmstat) {
 }
 
 /* Reread the netdevices file */
-int activity(FILE *netdevices) {
+int netact(FILE *netdevices) {
         static unsigned int prev_inpackets, prev_outpackets;
         unsigned int inpackets, outpackets;
         unsigned int device_inpackets, device_outpackets;
@@ -324,7 +324,7 @@ int main(int argc, char **argv) {
         rx_led(0);
 
         /* Save the current I/O stat values */
-        if (activity(vmstat) < 0)
+        if (diskact(vmstat) < 0)
                 goto out;
 
         /* Detach from terminal? */
@@ -358,11 +358,11 @@ int main(int argc, char **argv) {
                 int a;
                 if (nanosleep(&delay, NULL) < 0)
                         break;
-                a = activity(vmstat);
+                a = diskact(vmstat);
                 if (a < 0)
                         break;
                 hd_led(a);
-		if( activity(netdevices) < 0 )
+		if( netact(netdevices) < 0 )
                         break;
         }
 
