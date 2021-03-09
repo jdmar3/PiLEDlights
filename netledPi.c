@@ -225,9 +225,10 @@ int main(int argc, char **argv) {
 
 	/* If we can't set up pigpio, then just bail */
 	if( gpioInitialise() < 0 ) {
-		fprintf( stderr, "Unable to setup the piGPIO library. STOP." 
+		fprintf( stderr, "Unable to setup the piGPIO library. STOP."); 
 	}
 	gpioSetMode( o_gpiopin_rx, PI_OUTPUT );
+	gpioSetMode( o_gpiopin_tx, PI_OUTPUT );
 
 
         /* Open the netdevices file */
