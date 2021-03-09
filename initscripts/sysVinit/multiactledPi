@@ -1,0 +1,48 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          multiactledPi
+# Required-Start:    $local_fs
+# Required-Stop:
+# Should-Start:
+# Default-Start:      2 3 4 5
+# Default-Stop:
+# Short-Description: Start the multiactledPi daemon
+# Description:       A daemon that blinks LEDs connected to GPIO pins on disk and network activity
+### END INIT INFO
+
+PATH=/usr/local/bin:/sbin:/usr/sbin:/bin:/usr/bin
+NAME=multiactledPi
+DESC="Disk and network activity lights"
+# Define LSB log_* functions.
+# Depend on lsb-base (>= 3.0-6) to ensure that this file is present.
+. /lib/lsb/init-functions
+. /lib/init/vars.sh
+
+do_start () {
+        # Start disk activity light
+        log_daemon_msg "Starting $DESC" "$NAME"
+        multiactledPi -d -r 20
+        log_end_msg $?
+}
+
+
+case "$1" in
+  start|"")
+        do_start
+        ;;
+  restart|reload|force-reload)
+        echo "Error: argument '$1' not supported" >&2
+        exit 3
+        ;;
+  stop)
+        log_daemon_msg "Stopping $DESC" "$NAME"
+        killall multiactledPi
+        log_end_msg $?
+        ;;
+  *)
+        echo "Usage: multiactledPi [start|stop]" >&2
+        exit 3
+        ;;
+esac
+
+:

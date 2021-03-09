@@ -7,7 +7,7 @@ default: all
 
 # phony rules
 .PHONY: all
-all: netledPi actledPi hddledPi
+all: netledPi actledPi hddledPi multiactledPi
 
 netledPi:
 	$(CC) $(CFLAGS) -o netledPi netledPi.c
@@ -18,7 +18,9 @@ hddledPi:
 actledPi:
 	$(CC) $(CFLAGS) -o actledPi actledPi.c
 
+multiactledPi:
+	$(CC) $(CFLAGS) -o multiactledPi multiactledPi.c
 
 .PHONY: clean
 clean:
-	@rm -f *.o netledPi hddledPi actledPi
+	@rm -f *.o netledPi hddledPi actledPi multiactledPi

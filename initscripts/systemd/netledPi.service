@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=forking
-ExecStart=/usr/local/bin/netledPi -d
+ExecStart=/usr/bin/netledPi -d
 
 [Install]
 WantedBy=default.target
