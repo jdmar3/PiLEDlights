@@ -226,6 +226,7 @@ int main(int argc, char **argv) {
 	/* If we can't set up pigpio, then just bail */
 	if( gpioInitialise() < 0 ) {
 		fprintf( stderr, "Unable to setup the piGPIO library. STOP."); 
+		return -1;
 	}
 	gpioSetMode( o_gpiopin_rx, PI_OUTPUT );
 	gpioSetMode( o_gpiopin_tx, PI_OUTPUT );
